@@ -73,3 +73,8 @@ likewise not exposed here.
 
 - [`LumaSyncGuest2Sheet.gs`](LumaSyncGuest2Sheet.gs) — the Apps Script.
 - `README.md` — this file.
+- [`LICENSE`](LICENSE) — MIT license.
+
+## License
+
+Released under the [MIT License](LICENSE).
