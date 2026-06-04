@@ -264,12 +264,14 @@ function formatEventDate(ev) {
 }
 
 // Posts a registration update to Slack via an Incoming Webhook.
-function postToSlack(webhook, ev, newCount, total) {
+// Returns the HTTP status code (200 = success).
+function postToSlack(webhook, ev, newCount, total, isTest) {
   const name = (ev && ev.name) || 'your event';
   const when = formatEventDate(ev);
   const link = (ev && ev.url) || '';
 
   const lines = [];
+  if (isTest) lines.push(':test_tube: _Test message from LumaSync2Gsheet — please ignore._');
   lines.push(':tada: *' + newCount + ' new registration' + (newCount === 1 ? '' : 's') + '* for *' + name + '*');
   if (when) lines.push(':calendar: ' + when);
   lines.push(':busts_in_silhouette: *' + total + '* total registered');
@@ -281,8 +283,33 @@ function postToSlack(webhook, ev, newCount, total) {
     payload: JSON.stringify({ text: lines.join('\n') }),
     muteHttpExceptions: true
   });
-  if (res.getResponseCode() !== 200) {
-    Logger.log('Slack post error %s: %s', res.getResponseCode(), res.getContentText());
+  const code = res.getResponseCode();
+  if (code !== 200) Logger.log('Slack post error %s: %s', code, res.getContentText());
+  return code;
+}
+
+// TEST: run this manually to verify the Slack webhook. It posts a clearly-labelled
+// test message (real event name/date when Luma creds are set, with sample counts)
+// and does NOT modify the spreadsheet.
+function testSlackMessage() {
+  const webhook = PropertiesService.getScriptProperties().getProperty('SLACK_WEBHOOK_URL');
+  if (!webhook) {
+    throw new Error('SLACK_WEBHOOK_URL is not set — add it in Project Settings -> Script Properties.');
+  }
+
+  let ev = null;
+  try {
+    const cfg = getConfig();
+    ev = fetchEvent(cfg.apiKey, cfg.eventId); // real name/date if Luma creds are configured
+  } catch (e) {
+    Logger.log('Test: skipping event lookup (%s)', e.message);
+  }
+
+  const code = postToSlack(webhook, ev, 3, 128, true); // sample counts
+  if (code === 200) {
+    Logger.log('Test message posted to Slack successfully (HTTP 200).');
+  } else {
+    throw new Error('Slack returned HTTP ' + code + ' — check that the webhook URL is correct and active.');
   }
 }
 

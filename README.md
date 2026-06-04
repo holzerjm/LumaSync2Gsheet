@@ -64,6 +64,11 @@ To set it up:
 1. In Slack, create an **Incoming Webhook** for the target channel
    (<https://api.slack.com/messaging/webhooks>) and copy the webhook URL.
 2. Add it as the `SLACK_WEBHOOK_URL` Script Property.
+3. In the Apps Script editor, select **`testSlackMessage`** from the function
+   dropdown and click **Run**. It posts a clearly-labelled test message (with
+   sample counts) so you can confirm the webhook works before relying on the
+   scheduled sync — it does **not** modify the spreadsheet. The execution log
+   reports `HTTP 200` on success.
 
 Notes:
 
