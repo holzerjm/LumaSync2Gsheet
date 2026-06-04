@@ -39,6 +39,7 @@ refreshes — no server, no CSV middle-step.
    | `LUMA_API_KEY` | Your Luma API key (Calendar → Settings → Developer → API Keys) |
    | `LUMA_EVENT_ID` | Your event ID, e.g. `evt-XXXXXXXX` |
    | `SLACK_WEBHOOK_URL` | *(optional)* Slack Incoming Webhook URL for new-registration alerts |
+   | `TOA_EVENT_SHEET_URL` | *(optional)* When set, the Slack message links here as "View TOA Event Sheet" instead of to Luma |
 4. Edit the **Config** constants at the top of the script to match your sheet:
    - `SHEET_NAME` — the sheet that receives the guest rows
    - `STAMP_SHEET` / `STAMP_CELL` — where the "last updated" timestamp is written
@@ -79,6 +80,10 @@ Notes:
   the sync once before adding the webhook if you want to skip that initial post.
 - The event name and date come from Luma's `event/get` endpoint, rendered in the
   event's own timezone.
+- The trailing link defaults to the Luma event page (**View on Luma**). If
+  `TOA_EVENT_SHEET_URL` is set, it instead links to that URL as
+  **View TOA Event Sheet** — handy for pointing the channel straight at the synced
+  spreadsheet.
 
 ## Column ordering
 

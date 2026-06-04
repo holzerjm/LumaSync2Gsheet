@@ -18,9 +18,11 @@
  * SETUP
  *   1. Requires a Luma Plus calendar (the API is gated behind it).
  *   2. In Apps Script: Project Settings -> Script Properties, add:
- *        LUMA_API_KEY      = <your Luma API key>
- *        LUMA_EVENT_ID     = <your event id, looks like "evt-XXXXXXXX">
- *        SLACK_WEBHOOK_URL = <optional: Slack Incoming Webhook URL for updates>
+ *        LUMA_API_KEY        = <your Luma API key>
+ *        LUMA_EVENT_ID       = <your event id, looks like "evt-XXXXXXXX">
+ *        SLACK_WEBHOOK_URL   = <optional: Slack Incoming Webhook URL for updates>
+ *        TOA_EVENT_SHEET_URL = <optional: when set, the Slack message links to this
+ *                               URL as "View TOA Event Sheet" instead of to Luma>
  *   3. Edit the Config constants below to match your spreadsheet's sheet names
  *      and your event's question labels.
  *   4. Run syncLumaGuests once to authorise, then add a time-driven trigger
@@ -268,14 +270,19 @@ function formatEventDate(ev) {
 function postToSlack(webhook, ev, newCount, total, isTest) {
   const name = (ev && ev.name) || 'your event';
   const when = formatEventDate(ev);
-  const link = (ev && ev.url) || '';
+  const sheetUrl = PropertiesService.getScriptProperties().getProperty('TOA_EVENT_SHEET_URL');
+  const lumaUrl = (ev && ev.url) || '';
 
   const lines = [];
   if (isTest) lines.push(':test_tube: _Test message from LumaSync2Gsheet — please ignore._');
   lines.push(':tada: *' + newCount + ' new registration' + (newCount === 1 ? '' : 's') + '* for *' + name + '*');
   if (when) lines.push(':calendar: ' + when);
   lines.push(':busts_in_silhouette: *' + total + '* total registered');
-  if (link) lines.push('<' + link + '|View on Luma>');
+  if (sheetUrl) {
+    lines.push('<' + sheetUrl + '|View TOA Event Sheet>');
+  } else if (lumaUrl) {
+    lines.push('<' + lumaUrl + '|View on Luma>');
+  }
 
   const res = UrlFetchApp.fetch(webhook, {
     method: 'post',
