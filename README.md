@@ -18,7 +18,11 @@ refreshes — no server, no CSV middle-step.
   company + job-title answer, and renders the terms checkbox as `Agreed`.
 - Handles **cursor pagination** so the full guest list is fetched, not just page 1.
 - Writes a **last-updated timestamp** to a configurable cell on a dashboard sheet.
-- **No secrets in source** — the API key and event ID live in Script Properties.
+- **Posts a Slack update** when new registrations appear — the new + total counts
+  plus the event name and date — via an Incoming Webhook (only fires when there's
+  actually something new).
+- **No secrets in source** — the API key, event ID, and Slack webhook live in
+  Script Properties.
 
 ## Prerequisites
 
@@ -34,6 +38,7 @@ refreshes — no server, no CSV middle-step.
    |---|---|
    | `LUMA_API_KEY` | Your Luma API key (Calendar → Settings → Developer → API Keys) |
    | `LUMA_EVENT_ID` | Your event ID, e.g. `evt-XXXXXXXX` |
+   | `SLACK_WEBHOOK_URL` | *(optional)* Slack Incoming Webhook URL for new-registration alerts |
 4. Edit the **Config** constants at the top of the script to match your sheet:
    - `SHEET_NAME` — the sheet that receives the guest rows
    - `STAMP_SHEET` / `STAMP_CELL` — where the "last updated" timestamp is written
@@ -43,6 +48,32 @@ refreshes — no server, no CSV middle-step.
 5. Run `syncLumaGuests` once to authorise the script.
 6. Add a schedule: **Triggers ▸ Add Trigger ▸ `syncLumaGuests` ▸ Time-driven**
    (e.g. hourly or daily).
+
+## Slack notifications (optional)
+
+When `SLACK_WEBHOOK_URL` is set, every sync that finds **new** registrations posts a
+message to that channel, e.g.:
+
+> 🎉 **3 new registrations** for **Agent Day**
+> 📅 Sat, Jun 27, 2026 at 9:00 AM EDT
+> 👥 **128** total registered
+> View on Luma
+
+To set it up:
+
+1. In Slack, create an **Incoming Webhook** for the target channel
+   (<https://api.slack.com/messaging/webhooks>) and copy the webhook URL.
+2. Add it as the `SLACK_WEBHOOK_URL` Script Property.
+
+Notes:
+
+- The message only posts when the new count is greater than zero, so empty syncs
+  stay silent.
+- "New" is determined by comparing the `guest_id`s already in the sheet against the
+  freshly fetched list — so the **first** populated run reports everyone as new. Run
+  the sync once before adding the webhook if you want to skip that initial post.
+- The event name and date come from Luma's `event/get` endpoint, rendered in the
+  event's own timezone.
 
 ## Column ordering
 

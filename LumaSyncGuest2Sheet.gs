@@ -12,12 +12,15 @@
  *     row; custom registration questions are matched by their exact label.
  *   - Normalises Luma's per-question-type answer shapes (LinkedIn/GitHub paths,
  *     multi-select arrays, the bundled company+job-title answer, terms booleans).
+ *   - Optionally posts a Slack update (via an Incoming Webhook) when new
+ *     registrations appear, including the new + total counts and event name/date.
  *
  * SETUP
  *   1. Requires a Luma Plus calendar (the API is gated behind it).
  *   2. In Apps Script: Project Settings -> Script Properties, add:
- *        LUMA_API_KEY  = <your Luma API key>
- *        LUMA_EVENT_ID = <your event id, looks like "evt-XXXXXXXX">
+ *        LUMA_API_KEY      = <your Luma API key>
+ *        LUMA_EVENT_ID     = <your event id, looks like "evt-XXXXXXXX">
+ *        SLACK_WEBHOOK_URL = <optional: Slack Incoming Webhook URL for updates>
  *   3. Edit the Config constants below to match your spreadsheet's sheet names
  *      and your event's question labels.
  *   4. Run syncLumaGuests once to authorise, then add a time-driven trigger
@@ -62,6 +65,7 @@ function getConfig() {
 
 function syncLumaGuests() {
   const cfg = getConfig();
+  const slackWebhook = PropertiesService.getScriptProperties().getProperty('SLACK_WEBHOOK_URL');
 
   const all = [];
   STATUSES.forEach(function (s) {
@@ -84,6 +88,15 @@ function syncLumaGuests() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(SHEET_NAME) || ss.insertSheet(SHEET_NAME);
 
+  // Read guests already in the sheet BEFORE clearing, to detect newly-added ones
+  const prev = existingState(sheet);
+  let newCount = 0;
+  guests.forEach(function (g) {
+    const key = String(g[prev.keyField] || g.api_id || g.user_email || '');
+    if (key && !prev.keys[key]) newCount++;
+  });
+  const total = guests.length;
+
   // Adopt the column order already in row 1; fall back to COLUMNS
   const lastCol = sheet.getLastColumn();
   let columns = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0].filter(String) : [];
@@ -103,8 +116,13 @@ function syncLumaGuests() {
   const stampSheet = ss.getSheetByName(STAMP_SHEET) || ss.insertSheet(STAMP_SHEET);
   stampSheet.getRange(STAMP_CELL).setValue('Last updated: ' + stamp);
 
-  Logger.log('Synced %s guests in %s columns; stamped %s!%s',
-    rows.length, columns.length, STAMP_SHEET, STAMP_CELL);
+  Logger.log('Synced %s guests (%s new) in %s columns; stamped %s!%s',
+    total, newCount, columns.length, STAMP_SHEET, STAMP_CELL);
+
+  // Notify Slack only when new registrations appeared
+  if (slackWebhook && newCount > 0) {
+    postToSlack(slackWebhook, fetchEvent(cfg.apiKey, cfg.eventId), newCount, total);
+  }
 }
 
 function getValue(g, col) {
@@ -203,6 +221,69 @@ function fetchGuestsByStatus(apiKey, eventId, status) {
   } while (cursor && ++guard < 100);
 
   return out;
+}
+
+// Reads the keys (guest_id, or email as fallback) already present in the sheet,
+// so we can count how many of the freshly fetched guests are new since last sync.
+function existingState(sheet) {
+  const lastRow = sheet.getLastRow();
+  const lastCol = sheet.getLastColumn();
+  if (lastRow < 1 || lastCol < 1) return { keyField: 'api_id', keys: {} };
+  const header = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  let idx = header.indexOf('guest_id');
+  let keyField = 'api_id';
+  if (idx < 0) { idx = header.indexOf('email'); keyField = 'user_email'; }
+  const keys = {};
+  if (idx >= 0 && lastRow >= 2) {
+    sheet.getRange(2, idx + 1, lastRow - 1, 1).getValues().forEach(function (r) {
+      if (r[0]) keys[String(r[0]).trim()] = true;
+    });
+  }
+  return { keyField: keyField, keys: keys };
+}
+
+// Fetches the event so the Slack message can include its name and date.
+function fetchEvent(apiKey, eventId) {
+  const url = LUMA_API_BASE + '/event/get?id=' + encodeURIComponent(eventId);
+  const res = UrlFetchApp.fetch(url, {
+    headers: { 'x-luma-api-key': apiKey, 'accept': 'application/json' },
+    muteHttpExceptions: true
+  });
+  if (res.getResponseCode() !== 200) {
+    Logger.log('Event fetch error %s: %s', res.getResponseCode(), res.getContentText());
+    return null;
+  }
+  const data = JSON.parse(res.getContentText());
+  return data.event || data;
+}
+
+function formatEventDate(ev) {
+  if (!ev || !ev.start_at) return '';
+  const tz = ev.timezone || Session.getScriptTimeZone();
+  return Utilities.formatDate(new Date(ev.start_at), tz, "EEE, MMM d, yyyy 'at' h:mm a z");
+}
+
+// Posts a registration update to Slack via an Incoming Webhook.
+function postToSlack(webhook, ev, newCount, total) {
+  const name = (ev && ev.name) || 'your event';
+  const when = formatEventDate(ev);
+  const link = (ev && ev.url) || '';
+
+  const lines = [];
+  lines.push(':tada: *' + newCount + ' new registration' + (newCount === 1 ? '' : 's') + '* for *' + name + '*');
+  if (when) lines.push(':calendar: ' + when);
+  lines.push(':busts_in_silhouette: *' + total + '* total registered');
+  if (link) lines.push('<' + link + '|View on Luma>');
+
+  const res = UrlFetchApp.fetch(webhook, {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify({ text: lines.join('\n') }),
+    muteHttpExceptions: true
+  });
+  if (res.getResponseCode() !== 200) {
+    Logger.log('Slack post error %s: %s', res.getResponseCode(), res.getContentText());
+  }
 }
 
 // Run once to inspect the raw API response shape (helpful when adding columns)
