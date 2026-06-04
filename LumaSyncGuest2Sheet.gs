@@ -23,6 +23,8 @@
  *        SLACK_WEBHOOK_URL   = <optional: Slack Incoming Webhook URL for updates>
  *        TOA_EVENT_SHEET_URL = <optional: when set, the Slack message links to this
  *                               URL as "View TOA Event Sheet" instead of to Luma>
+ *        TOA_EVENT_NAME      = <optional: event name to show in the Slack message
+ *                               instead of the name fetched from Luma>
  *   3. Edit the Config constants below to match your spreadsheet's sheet names
  *      and your event's question labels.
  *   4. Run syncLumaGuests once to authorise, then add a time-driven trigger
@@ -268,9 +270,10 @@ function formatEventDate(ev) {
 // Posts a registration update to Slack via an Incoming Webhook.
 // Returns the HTTP status code (200 = success).
 function postToSlack(webhook, ev, newCount, total, isTest) {
-  const name = (ev && ev.name) || 'your event';
+  const props = PropertiesService.getScriptProperties();
+  const name = props.getProperty('TOA_EVENT_NAME') || (ev && ev.name) || 'your event';
   const when = formatEventDate(ev);
-  const sheetUrl = PropertiesService.getScriptProperties().getProperty('TOA_EVENT_SHEET_URL');
+  const sheetUrl = props.getProperty('TOA_EVENT_SHEET_URL');
   const lumaUrl = (ev && ev.url) || '';
 
   const lines = [];
