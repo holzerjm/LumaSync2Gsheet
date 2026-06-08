@@ -1,5 +1,10 @@
 # LumaSync2Gsheet
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Google Apps Script](https://img.shields.io/badge/Google-Apps%20Script-4285F4?logo=googleappsscript&logoColor=white)](https://www.google.com/script/start/)
+[![Google Sheets](https://img.shields.io/badge/Google-Sheets-34A853?logo=googlesheets&logoColor=white)](https://www.google.com/sheets/about/)
+[![Luma](https://img.shields.io/badge/Luma-API-FF5C5C.svg)](https://lu.ma)
+
 A Google Apps Script that syncs a [Luma](https://lu.ma) event's guest list into a
 Google Sheet via the Luma public API, and stamps a "last updated" timestamp on a
 dashboard sheet. Designed to run on a time-driven trigger for hands-off, scheduled
