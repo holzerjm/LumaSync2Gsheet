@@ -237,12 +237,12 @@ function personName(v) {
   return v;
 }
 
-// Luma's CSV export has a "referrer" column, but get-guests does NOT return it.
-// Verified against a full 67-guest list: "referrer" is absent from the guest object
-// entirely, and "custom_source"/"utm_source" are present but empty for every guest.
-// This resolver is kept so the column populates by itself should Luma start
-// returning the field. To check whether the single-guest endpoint exposes it, run
-// debugSingleGuest(). Otherwise the CSV export remains the only source.
+// Luma's CSV export has a "referrer" column, but the API does NOT return it.
+// Verified on a full 67-guest list: "referrer" is absent from the guest object
+// entirely, "custom_source"/"utm_source" are present but empty for every guest, and
+// the single-guest endpoint does not carry it either (see debugSingleGuest).
+// Attribution is export-only. This resolver is kept so the column fills in by
+// itself should Luma add the field to the API later.
 const REFERRER_FIELDS = ['referrer', 'custom_source'];
 
 function referrerOf(g) {

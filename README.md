@@ -112,13 +112,19 @@ manual CSV export: `coupon_code`, `survey_response_rating`,
 `survey_response_feedback`. Host-added fields/tags (not registration answers) are
 likewise not exposed here.
 
-**`referrer` and `referred_by` are not available through this endpoint.** The CSV
-export has a populated `referrer` column, but the guest objects returned by
-`get-guests` contain no `referrer` field at all, and `custom_source` / `utm_source`
-come back empty (verified across a full 67-guest list). If you need attribution
-data, take it from the manual CSV export. Run `debugGuestFields` to re-check on
-your own event — if Luma adds the field later, the script picks it up with no
-code change.
+**`referrer` and `referred_by` are not available through the API.** The CSV export
+has a populated `referrer` column, but the guest objects returned by `get-guests`
+contain no `referrer` field at all, and `custom_source` / `utm_source` come back
+empty (verified across a full 67-guest list). The single-guest endpoint does not
+return it either. Attribution is export-only — take it from the manual CSV.
+
+Run `debugGuestFields` to re-check on your own event; if Luma adds the field later
+the script picks it up with no code change.
+
+> Note: each sync clears the sheet and rewrites every row, so values pasted by hand
+> into a synced tab (referrer data from a CSV, for example) are overwritten on the
+> next run. Keep manual data on a separate tab and join it with `VLOOKUP` on
+> `guest_id`.
 
 > Amounts are returned in **cents** and formatted as `$0.00`. If you run a paid
 > event and the figures look off by 100×, remove the `/ 100` in `money()`.
