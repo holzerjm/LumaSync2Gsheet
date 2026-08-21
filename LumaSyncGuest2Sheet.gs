@@ -237,10 +237,12 @@ function personName(v) {
   return v;
 }
 
-// Luma's CSV export has a "referrer" column, but the guest object returned by the
-// API has not always used that name — older payloads carried "custom_source"
-// instead. Try each known candidate in order. If the column still comes out empty,
-// run debugGuestFields() to see exactly which field holds the value.
+// Luma's CSV export has a "referrer" column, but get-guests does NOT return it.
+// Verified against a full 67-guest list: "referrer" is absent from the guest object
+// entirely, and "custom_source"/"utm_source" are present but empty for every guest.
+// This resolver is kept so the column populates by itself should Luma start
+// returning the field. To check whether the single-guest endpoint exposes it, run
+// debugSingleGuest(). Otherwise the CSV export remains the only source.
 const REFERRER_FIELDS = ['referrer', 'custom_source'];
 
 function referrerOf(g) {
@@ -458,6 +460,52 @@ function debugLumaResponse() {
     }
   }
   Logger.log('No guests found in any of: %s', STATUSES.join(', '));
+}
+
+// Probes the single-guest endpoint for one guest and dumps what it returns. Luma's
+// docs say the list response carries guest summaries but not the fuller per-guest
+// detail, so this checks whether fields missing from get-guests (notably referrer)
+// are reachable there. The exact parameter form is not documented publicly, so a
+// few are tried and the response code of each is logged.
+function debugSingleGuest() {
+  const cfg = getConfig();
+  let sample = null;
+  for (let i = 0; i < STATUSES.length && !sample; i++) {
+    sample = fetchGuestsByStatus(cfg.apiKey, cfg.eventId, STATUSES[i])[0] || null;
+  }
+  if (!sample) { Logger.log('No guests found in any of: %s', STATUSES.join(', ')); return; }
+
+  const pk = (String(sample.check_in_qr_code || '').match(/[?&]pk=([^&]+)/) || [])[1];
+  const attempts = [
+    ['event_id + api_id', 'event_id=' + encodeURIComponent(cfg.eventId) +
+                          '&api_id=' + encodeURIComponent(sample.api_id || '')],
+    pk ? ['id (pk from check-in URL)', 'id=' + encodeURIComponent(pk)] : null,
+    ['event_id + email', 'event_id=' + encodeURIComponent(cfg.eventId) +
+                         '&email=' + encodeURIComponent(sample.user_email || '')]
+  ].filter(Boolean);
+
+  for (let i = 0; i < attempts.length; i++) {
+    const res = UrlFetchApp.fetch(LUMA_API_BASE + '/event/get-guest?' + attempts[i][1], {
+      headers: { 'x-luma-api-key': cfg.apiKey, 'accept': 'application/json' },
+      muteHttpExceptions: true
+    });
+    const code = res.getResponseCode();
+    Logger.log('Tried %s -> HTTP %s', attempts[i][0], code);
+    if (code !== 200) continue;
+
+    const body = JSON.parse(res.getContentText());
+    const g = body.guest || body;
+    Logger.log('Fields returned by get-guest (%s):', attempts[i][0]);
+    Object.keys(g).sort().forEach(function (k) {
+      if (k === 'registration_answers') return;
+      let v = g[k];
+      if (v && typeof v === 'object') v = JSON.stringify(v);
+      v = String(v);
+      Logger.log('  %s = %s', k, v.length > 100 ? v.slice(0, 100) + '...' : v);
+    });
+    return;
+  }
+  Logger.log('No parameter form returned 200 — referrer is likely not exposed by the API at all.');
 }
 
 // Lists every top-level field on the guest objects, with how many guests have it
