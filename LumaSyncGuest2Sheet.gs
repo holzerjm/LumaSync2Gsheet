@@ -156,7 +156,7 @@ function getValue(g, col) {
     case 'approval_status': return g.approval_status || '';
     case 'checked_in_at':   return g.checked_in_at || '';
     case 'utm_source':      return g.utm_source || '';
-    case 'referrer':        return g.referrer || '';
+    case 'referrer':        return referrerOf(g);
     case 'referred_by':     return personName(g.referred_by);
     case 'qr_code_url':     return g.check_in_qr_code || '';
     case 'amount':          return money(t.amount);
@@ -235,6 +235,20 @@ function personName(v) {
   if (v == null) return '';
   if (typeof v === 'object') return v.name || v.email || v.api_id || '';
   return v;
+}
+
+// Luma's CSV export has a "referrer" column, but the guest object returned by the
+// API has not always used that name — older payloads carried "custom_source"
+// instead. Try each known candidate in order. If the column still comes out empty,
+// run debugGuestFields() to see exactly which field holds the value.
+const REFERRER_FIELDS = ['referrer', 'custom_source'];
+
+function referrerOf(g) {
+  for (let i = 0; i < REFERRER_FIELDS.length; i++) {
+    const v = g[REFERRER_FIELDS[i]];
+    if (v != null && v !== '') return (typeof v === 'object') ? personName(v) : v;
+  }
+  return '';
 }
 
 // Returns the header plus any registration question that has no column yet, so a
@@ -444,6 +458,41 @@ function debugLumaResponse() {
     }
   }
   Logger.log('No guests found in any of: %s', STATUSES.join(', '));
+}
+
+// Lists every top-level field on the guest objects, with how many guests have it
+// populated and a sample value. Use this when a non-question column stays blank:
+// it shows the exact API field name to map, and because it counts across all
+// guests, a field that is only sometimes set cannot hide behind an empty sample.
+function debugGuestFields() {
+  const cfg = getConfig();
+  const guests = [];
+  STATUSES.forEach(function (s) {
+    guests.push.apply(guests, fetchGuestsByStatus(cfg.apiKey, cfg.eventId, s));
+  });
+  if (!guests.length) { Logger.log('No guests found in any of: %s', STATUSES.join(', ')); return; }
+
+  const skip = { registration_answers: 1, guest: 1, event_tickets: 1, event_ticket: 1 };
+  const stats = {};
+  guests.forEach(function (g) {
+    Object.keys(g).forEach(function (k) {
+      if (skip[k]) return;
+      if (!stats[k]) stats[k] = { filled: 0, sample: '' };
+      const v = g[k];
+      if (v == null || v === '') return;
+      stats[k].filled++;
+      if (!stats[k].sample) {
+        const s = (typeof v === 'object') ? JSON.stringify(v) : String(v);
+        stats[k].sample = s.length > 80 ? s.slice(0, 80) + '...' : s;
+      }
+    });
+  });
+
+  Logger.log('Top-level guest fields across %s guests  —  field: filled/total  sample', guests.length);
+  Object.keys(stats).sort().forEach(function (k) {
+    Logger.log('  %s: %s/%s  %s', k, stats[k].filled, guests.length, stats[k].sample);
+  });
+  Logger.log('Referrer candidates tried, in order: %s', REFERRER_FIELDS.join(', '));
 }
 
 // Lists every registration question the event actually returns, with its type and
