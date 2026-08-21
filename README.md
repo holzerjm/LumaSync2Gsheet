@@ -16,8 +16,14 @@ refreshes — no server, no CSV middle-step.
   `waitlist`, `declined`, …). Luma's `get-guests` endpoint filters by status, so
   omitting one silently drops those guests — this script requests each explicitly.
 - **Preserves your column order**: it adopts whatever header row already exists in
-  the destination sheet, and matches custom registration questions by their exact
-  label. Reorder columns by rearranging row 1 — no code change needed.
+  the destination sheet, and matches custom registration questions by their label.
+  Reorder columns by rearranging row 1 — no code change needed.
+- **Tolerant label matching**: case, repeated spaces and spaces before punctuation
+  are ignored, so a Luma question saved as `Which  area will you focus on ?` still
+  matches `Which area will you focus on?` in the sheet.
+- **No silently missing questions**: any registration question with no column in
+  row 1 is appended automatically and logged (see `AUTO_ADD_QUESTION_COLUMNS`), so
+  switching the script to a new event with different questions doesn't lose data.
 - **Normalises Luma's answer shapes** per question type: rebuilds full LinkedIn /
   GitHub URLs from the stored paths, joins multi-select arrays, splits the bundled
   company + job-title answer, and renders the terms checkbox as `Agreed`.
@@ -113,8 +119,18 @@ likewise not exposed here.
 
 - **Only the header row appears / no data** — usually means a status filter excluded
   your guests. Confirm `STATUSES` includes the states your registrants are in.
-- **A column is blank** — run `debugLumaResponse` once and check the execution log;
-  it prints the raw JSON for one guest so you can confirm the exact field/label name.
+- **A column is blank** — run `debugQuestionLabels`. It lists every registration
+  question the event actually returns, with its type, so you can copy the exact
+  label into row 1. `debugLumaResponse` prints the full raw JSON for one guest when
+  you need to check a non-question field.
+- **Switched the script to a new event and columns are empty** — row 1 is probably
+  still the previous event's header. The questions differ per event, so replace row 1
+  with the new event's columns (or let `AUTO_ADD_QUESTION_COLUMNS` append them and
+  delete the stale ones). Note that `referrer` and other standard fields are *not*
+  auto-added — only registration questions are.
+- **Formulas or charts that reference the sheet by column letter** (e.g.
+  `'Guests'!E2:E`) will shift if you insert columns ahead of them. Add new standard
+  fields at the end, or re-point those formulas afterwards.
 
 ## Files
 

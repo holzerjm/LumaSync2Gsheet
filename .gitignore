@@ -1,0 +1,8 @@
+# Local working copies of the script, configured with real sheet names, event
+# question labels and other environment-specific values. Keep them out of the
+# public repo — LumaSyncGuest2Sheet.gs is the generic, shareable version.
+*-jmh.gs
+*.local.gs
+
+# Local exports and scratch data (may contain attendee personal data)
+*.csv

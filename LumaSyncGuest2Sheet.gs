@@ -9,7 +9,9 @@
  *   - Fetches every approval status you list (Luma's get-guests filters by status,
  *     so omitting a status drops those guests — e.g. all pending_approval ones).
  *   - Adopts the column order already present in the destination sheet's header
- *     row; custom registration questions are matched by their exact label.
+ *     row; custom registration questions are matched by label, ignoring case and
+ *     stray whitespace. Questions with no column yet are appended automatically
+ *     (see AUTO_ADD_QUESTION_COLUMNS), so a new event's questions cannot go missing.
  *   - Normalises Luma's per-question-type answer shapes (LinkedIn/GitHub paths,
  *     multi-select arrays, the bundled company+job-title answer, terms booleans).
  *   - Optionally posts a Slack update (via an Incoming Webhook) when new
@@ -40,18 +42,27 @@ const STAMP_CELL  = 'B1';           // cell to write the timestamp into
 const STATUSES    = ['approved', 'pending_approval', 'waitlist', 'declined']; // add 'invited','session' if needed
 const PAGE_LIMIT  = 100;
 
-// Luma's "company" question returns BOTH the company and the job title in a single
-// answer object. Set these to your event's exact labels. Leave JOB_TITLE_COLUMN as
-// '' if you don't keep job title in its own column.
-const COMPANY_QUESTION_LABEL = 'What company do you work for?';
-const JOB_TITLE_COLUMN       = 'What is your job title?';
+// When true, any registration question present in the Luma data that has no column
+// in row 1 is appended as a new column at the end. Existing columns are never
+// reordered or removed. This keeps the sheet complete when an event's questions
+// change; set to false to freeze the layout to exactly what row 1 says.
+const AUTO_ADD_QUESTION_COLUMNS = true;
+
+// Luma's "company" question type returns BOTH the company and the job title in a
+// single answer object — the job title has no answer entry of its own. The company
+// question is detected automatically by its type, so no label needs configuring.
+// This names the column that should receive that bundled job title when the event
+// has no standalone job-title question. Matching ignores case and extra spaces, and
+// any column whose name mentions "job title" or "role" is also accepted.
+const JOB_TITLE_COLUMN = 'What is your job title?';
 
 // Fallback column order — used ONLY if the destination sheet has no header row yet.
 // Normally the script keeps whatever order already exists in row 1, so add your
-// custom-question columns there (named exactly as the Luma question label).
+// custom-question columns there (named as the Luma question label).
 const COLUMNS = [
   'guest_id','name','first_name','last_name','email','phone_number','created_at',
-  'approval_status','checked_in_at','utm_source','qr_code_url','amount','amount_tax',
+  'approval_status','checked_in_at','utm_source','referrer','referred_by',
+  'qr_code_url','amount','amount_tax',
   'amount_discount','currency','coupon_code','eth_address','solana_address',
   'survey_response_rating','survey_response_feedback','ticket_type_id','ticket_name'
 ];
@@ -106,6 +117,8 @@ function syncLumaGuests() {
   let columns = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0].filter(String) : [];
   if (!columns.length) columns = COLUMNS;
 
+  columns = withMissingQuestionColumns(columns, guests);
+
   const rows = guests.map(function (g) {
     return columns.map(function (col) { return getValue(g, col); });
   });
@@ -132,16 +145,6 @@ function syncLumaGuests() {
 function getValue(g, col) {
   const t = (g.event_tickets && g.event_tickets[0]) || {};
 
-  // Luma bundles company + job title into one "company" answer
-  if (JOB_TITLE_COLUMN && col === JOB_TITLE_COLUMN) {
-    const c = answerByLabel(g, COMPANY_QUESTION_LABEL);
-    return c ? (c.answer_job_title != null ? c.answer_job_title : ((c.value && c.value.job_title) || '')) : '';
-  }
-  if (col === COMPANY_QUESTION_LABEL) {
-    const c = answerByLabel(g, COMPANY_QUESTION_LABEL);
-    return c ? (c.answer_company != null ? c.answer_company : ((c.value && c.value.company) || c.answer || '')) : '';
-  }
-
   switch (col) {
     case 'guest_id':        return g.api_id || '';
     case 'name':            return g.user_name || g.name || '';
@@ -153,6 +156,8 @@ function getValue(g, col) {
     case 'approval_status': return g.approval_status || '';
     case 'checked_in_at':   return g.checked_in_at || '';
     case 'utm_source':      return g.utm_source || '';
+    case 'referrer':        return g.referrer || '';
+    case 'referred_by':     return personName(g.referred_by);
     case 'qr_code_url':     return g.check_in_qr_code || '';
     case 'amount':          return money(t.amount);
     case 'amount_tax':      return money(t.amount_tax);
@@ -163,15 +168,108 @@ function getValue(g, col) {
     case 'solana_address':  return g.solana_address || '';
     case 'survey_response_rating':   return g.survey_response_rating || '';   // not returned by get-guests
     case 'survey_response_feedback': return g.survey_response_feedback || ''; // not returned by get-guests
-    case 'ticket_type_id':  return t.event_ticket_type_id || '';
+    case 'ticket_type_id':  return t.event_ticket_type_id || t.event_ticket_type_api_id || '';
     case 'ticket_name':     return t.name || '';
-    default:
-      return formatAnswer(answerByLabel(g, col)); // any custom registration question, matched by label
   }
+
+  // Not a standard field, so it is a registration question, matched by label.
+  const a = answerByLabel(g, col);
+  if (a) {
+    if (a.question_type === 'company') {
+      if (a.answer_company != null) return a.answer_company;
+      if (a.value && a.value.company != null) return a.value.company;
+      return a.answer || '';
+    }
+    return formatAnswer(a);
+  }
+
+  // No question carries this label. It may be the job-title half of Luma's bundled
+  // "company" question, which is not returned as an answer of its own.
+  const c = companyAnswer(g);
+  if (c && looksLikeJobTitle(col)) {
+    if (c.answer_job_title != null) return c.answer_job_title;
+    return (c.value && c.value.job_title) || '';
+  }
+
+  return '';
+}
+
+// Labels are compared loosely: case, repeated spaces and spaces before punctuation
+// are ignored, so a Luma label like "Which  area will you focus on ?" still matches
+// "Which area will you focus on?" typed in the sheet. Luma preserves whatever the
+// host typed when creating the question, stray spaces included.
+function normLabel(s) {
+  return String(s == null ? '' : s)
+    .replace(/\s+/g, ' ')
+    .replace(/\s+([?!.:,])/g, '$1')
+    .trim()
+    .toLowerCase();
 }
 
 function answerByLabel(g, label) {
-  return (g.registration_answers || []).filter(function (a) { return a.label === label; })[0];
+  const want = normLabel(label);
+  if (!want) return undefined;
+  const answers = g.registration_answers || [];
+  for (let i = 0; i < answers.length; i++) {
+    if (normLabel(answers[i].label) === want) return answers[i];
+  }
+  return undefined;
+}
+
+// Luma's bundled company question, found by type rather than by a configured label.
+function companyAnswer(g) {
+  return (g.registration_answers || []).filter(function (a) {
+    return a.question_type === 'company';
+  })[0];
+}
+
+function looksLikeJobTitle(col) {
+  const n = normLabel(col);
+  if (!n) return false;
+  if (JOB_TITLE_COLUMN && n === normLabel(JOB_TITLE_COLUMN)) return true;
+  return n.indexOf('job title') >= 0 || n.indexOf('role') >= 0;
+}
+
+// referred_by may be a plain string or a user object depending on the event.
+function personName(v) {
+  if (v == null) return '';
+  if (typeof v === 'object') return v.name || v.email || v.api_id || '';
+  return v;
+}
+
+// Returns the header plus any registration question that has no column yet, so a
+// new event's questions cannot silently go missing.
+function withMissingQuestionColumns(columns, guests) {
+  const known = {};
+  columns.forEach(function (c) { known[normLabel(c)] = true; });
+
+  const missing = [], seen = {};
+  let hasCompanyQuestion = false;
+
+  guests.forEach(function (g) {
+    if (companyAnswer(g)) hasCompanyQuestion = true;
+    (g.registration_answers || []).forEach(function (a) {
+      const n = normLabel(a.label);
+      if (!n || known[n] || seen[n]) return;
+      seen[n] = true;
+      missing.push(a.label);
+    });
+  });
+
+  // The bundled job title has no answer entry, so check for its column separately.
+  const needsJobTitleColumn = hasCompanyQuestion && JOB_TITLE_COLUMN &&
+    !columns.some(looksLikeJobTitle) && !missing.some(looksLikeJobTitle);
+  if (needsJobTitleColumn) missing.push(JOB_TITLE_COLUMN);
+
+  if (!missing.length) return columns;
+
+  Logger.log('Questions with no column in row 1: %s', missing.join(' | '));
+  if (!AUTO_ADD_QUESTION_COLUMNS) {
+    Logger.log('AUTO_ADD_QUESTION_COLUMNS is off — these will not be written.');
+    return columns;
+  }
+  Logger.log('Appending %s new column(s) to the header.', missing.length);
+  return columns.concat(missing);
 }
 
 function formatAnswer(a) {
@@ -323,14 +421,52 @@ function testSlackMessage() {
   }
 }
 
-// Run once to inspect the raw API response shape (helpful when adding columns)
+// Run once to inspect the raw API response shape (helpful when adding columns).
+// Tries each configured status so it still finds a sample when, for example, every
+// guest is already approved.
 function debugLumaResponse() {
   const cfg = getConfig();
-  const url = LUMA_API_BASE + '/event/get-guests?event_id=' + encodeURIComponent(cfg.eventId)
-    + '&approval_status=pending_approval&pagination_limit=1';
-  const res = UrlFetchApp.fetch(url, {
-    headers: { 'x-luma-api-key': cfg.apiKey, 'accept': 'application/json' },
-    muteHttpExceptions: true
+  for (let i = 0; i < STATUSES.length; i++) {
+    const url = LUMA_API_BASE + '/event/get-guests?event_id=' + encodeURIComponent(cfg.eventId)
+      + '&approval_status=' + encodeURIComponent(STATUSES[i]) + '&pagination_limit=1';
+    const res = UrlFetchApp.fetch(url, {
+      headers: { 'x-luma-api-key': cfg.apiKey, 'accept': 'application/json' },
+      muteHttpExceptions: true
+    });
+    if (res.getResponseCode() !== 200) {
+      Logger.log('Error %s for status %s: %s', res.getResponseCode(), STATUSES[i], res.getContentText());
+      continue;
+    }
+    const data = JSON.parse(res.getContentText());
+    if (data.entries && data.entries.length) {
+      Logger.log('Sample guest (status: %s)\n%s', STATUSES[i], res.getContentText());
+      return;
+    }
+  }
+  Logger.log('No guests found in any of: %s', STATUSES.join(', '));
+}
+
+// Lists every registration question the event actually returns, with its type and
+// the column the script would map it to. Run this whenever a column stays blank —
+// it shows the exact label text to put in row 1.
+function debugQuestionLabels() {
+  const cfg = getConfig();
+  const labels = {};
+  STATUSES.forEach(function (s) {
+    fetchGuestsByStatus(cfg.apiKey, cfg.eventId, s).forEach(function (g) {
+      (g.registration_answers || []).forEach(function (a) {
+        if (a.label && !labels[a.label]) labels[a.label] = a.question_type || '(unknown)';
+      });
+    });
   });
-  Logger.log(res.getContentText());
+
+  const found = Object.keys(labels);
+  if (!found.length) { Logger.log('No registration answers found.'); return; }
+
+  Logger.log('Registration questions returned by Luma (copy these into row 1):');
+  found.forEach(function (l) {
+    Logger.log('  [%s]  %s%s', labels[l], l,
+      labels[l] === 'company' ? '   <- also carries the job title' : '');
+  });
+  Logger.log('Job title column in use: %s', JOB_TITLE_COLUMN || '(none)');
 }
